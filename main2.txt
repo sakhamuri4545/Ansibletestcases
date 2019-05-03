@@ -1,0 +1,94 @@
+---
+- hosts: webserver
+  
+     gather_facts: true
+  
+     tasks:
+    
+       - name: create a user for services management
+      
+         win_user:
+        
+           name: serviceuser
+        
+           password: test$123
+        
+           state: present
+        
+           description: User to test the services
+        
+           groups:
+          
+             - Administrators 
+
+    
+       - name: start the services if not already running
+      
+         win_service:
+        
+           name: "{{ item }}"
+        
+           state: started
+           
+           with_items:
+        
+             - BDESVC
+        
+             - WMSVC
+
+    
+       - name: Set a JAVA_HOME variable
+      
+         win_environment:
+        
+           state: present
+        
+           name: JAVA_HOME
+        
+           value: C:\TestJavaHome
+        
+           level: machine
+
+    
+       - name: copy the dummy executable file used for service creation
+      
+         win_copy:
+        
+           src: /home/ansible/ansible/environments/roles/common/tasks/testservice.exe
+        
+           dest: C:\temp\testservice.exe
+
+    
+       - name: create the service
+      
+         win_service:
+        
+           name: testservice
+        
+           path: C:\temp\testservice.exe
+        
+           start_mode: manual
+
+    
+       - name: Start the service
+      
+         win_service:
+        
+           name: testservice
+        
+           state: started
+        
+           username: .\serviceuser
+        
+           password: test$123
+      
+           register: testservice_stat
+
+    
+       - name: test if the service has changed
+      
+         debug:
+        
+           msg: Service status has changed from stopped to running
+      
+         when: testservice_stat.changed

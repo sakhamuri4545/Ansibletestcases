@@ -1,0 +1,119 @@
+---
+- hosts: webserver
+  gather_facts: true
+  tasks:
+    - name: create a file on windows server
+      win_file:
+        path: C:/temp/hello
+        state: touch
+
+    - name: Install IIS
+      win_feature:
+        name: Web-Server
+        state: present
+        restart: no
+        include_management_tools: True
+#        include_sub_features: True
+
+    - name: Check the dotnet version
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full
+        name: Version
+      register: dotnet_version
+
+    - name: Install .NET version
+      file:
+        state: touch
+        path: C:/temp/install_dotnet
+      when: dotnet_version.value | version_compare('4.6.01', '<', strict=True)
+
+    - name: create a local user
+      win_user:
+        name: webuser
+        password: test$123
+        state: present
+        description: User to Manage the IIS
+        groups:
+          - Administrators
+
+    - name: Create directory structure
+      win_file:
+        path: C:\inetpub\ansibletestapp
+        state: directory
+
+    - name: Create App Pool in IIS
+      win_iis_webapppool:
+        name: AnsiblePool
+        state: started
+        managedRuntimeVersion: v4.0
+        attributes:
+          processModel.identityType: SpecificUser
+          processModel.userName: webuser
+          processModel.password: test$123
+          processModel.loadUserProfile: True
+
+    - name: Add JAVA_HOME environment variable
+      win_environment:
+        level: machine
+        name: JAVA_HOME
+        value: 'C:\Temp\JAVA'
+        state: present
+
+    - name: add html content
+      win_file:
+        path: 'c:/inetpub\ansibletestapp\index.html'
+        state: touch
+
+    - name: add content
+      win_lineinfile:
+        path: 'c:/inetpub\ansibletestapp\index.html'
+        create: yes
+        line: Hello world
+
+    - name: Deploy App to IIS App pool
+      win_iis_website:
+        application_pool: AnsiblePool
+        name: AnsibleTestApp
+        physical_path: C:\inetpub\AnsibleTestApp
+        port: 8080
+
+    - name: copy psexec
+      win_copy:
+        src: \temp\psexec.exe
+        dest: C:\Windows\system32\psexec.exe
+
+    - name: Run create directory command as other user on target server
+      win_psexec:
+        command: cmd /c mkdir c:\testfolder2
+      become_user: webuser
+      become_method: runas
+      become: yes
+      vars:
+        ansible_become_pass: test$123
+      when: not foldvar.stat.exists
+      register: cmdreslt
+
+    - name: Start the IIS App
+      win_iis_website:
+        name: AnsibleTestApp
+        state: started
+        port: 8080
+        application_pool: AnsiblePool
+        physical_path: c:\inetpub\anisbletestapp
+      when: cmdreslt is succeeded
+
+    - name: Test the app status
+      win_uri:
+        url: http://privateIPof windows server:8080
+      register: httpresponse
+      ignore_errors: true
+
+    - name: Print success
+      debug:
+        msg:  "Application successfullly deployed"
+      when: httpresponse.failed == false and httpresponse.status_code == 200
+
+    - name: Print failure
+      debug:
+        msg: "Failed to start app"
+      when: httpresponse.failed == true and httpresponse.status_code != 200
