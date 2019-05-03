@@ -1,0 +1,122 @@
+---
+- hosts: webserver
+  gather_facts: true
+  tasks:
+    - name: Install IIS
+      win_feature:
+        name: Web-Server
+        state: present
+        restart: no
+        include_management_tools: True
+        include_sub_features: True
+
+    - name: Check the dotnet version
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full
+        name: Version
+      register: dotnet_version
+
+    - name: Install .NET version
+      file:
+        state: touch
+        path: C:/temp/install_dotnet
+      when: dotnet_version.value | version_compare('4.6.01', '<', strict=True)
+
+    - name: create a local user
+      win_user:
+        name: webuser
+        password: test$123
+        state: present
+        description: User to Manage the IIS
+        groups:
+          - Administrators
+
+    - name: Create App Pool in IIS
+      win_iis_webapppool:
+        name: AnsiblePool
+        state: started
+        managedRuntimeVersion: v4.0
+        attributes:
+          processModel.identityType: SpecificUser
+          processModel.userName: webuser
+          processModel.password: test$123
+          processModel.loadUserProfile: True
+
+    - name: Add JAVA_HOME environment variable
+      win_environment:
+        level: machine
+        name: JAVA_HOME
+        value: 'C:\Temp\JAVA'
+        state: present
+
+    - name: Create test app dir
+      win_file:
+        path: C:\inetpub\AnsibleTestApp
+        state: directory
+
+    - name: Create html file
+      win_file:
+        path: C:\inetpub\AnsibleTestApp\index.html
+        state: touch
+
+    - name: Add content
+      win_lineinfile:
+        path: C:\inetpub\AnsibleTestApp\index.html
+        line: hello from ansible test
+
+    - name: Deploy App to IIS App pool
+      win_iis_website:
+        application_pool: AnsiblePool
+        name: AnsibleTestApp
+        physical_path: C:\inetpub\AnsibleTestApp
+        state: started
+        port: 8080
+
+    - name: create a file on windows server
+      win_file:
+        path: C:/temp/hello
+        state: touch
+
+    - name: Add HTML file
+      win_file:
+        path: 'C:/inetpub/wwwroot/index.html'
+        state: touch
+
+    - name: Add content
+      win_lineinfile:
+        path: 'C:/inetpub/wwwroot/index.html'
+        create: yes
+        line: hello world
+
+#    - name: run setup.exc installer on multiple servers using another user
+ #     win_psexec:
+  #      command: c:\setup.exc /i /iaccepteula
+   #     hostnames:
+    #      - testgroup
+     #   username: webuser
+      #  password: test$123
+       # priority: high
+
+    - name: Execute command as other user
+      win_psexec:
+        command: whoami.exe
+      register: current_run_user
+
+    - name: Print the content to screen
+      debug: '{{ current_run_user.stdout }}'
+
+    - name: Backup application
+      win_copy:
+        src: C:\inetpub\AnsibleTestApp
+        dest: C:\temp\
+        remote_src: yes
+
+#    - name: Test the Application status
+#      win_uri:
+#        url: 'http://{{ hostvars[inventory_hostname].ansible_default_ipv4.address }}:8080'
+#      register: http_output
+#
+#    - name: Print Success
+#      debug:
+#        msg: Website Deployed suuccessfully
+#      when:  '{{ http_output.status_code == 200 }}'
